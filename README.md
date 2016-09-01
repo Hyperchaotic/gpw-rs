@@ -27,11 +27,7 @@ for _ in 0..10 {
     let pw = gpgen.generate_passphrase(pp_length);
     println!("{}", pw);
 }
-
-## Motivation
-
-A short description of the motivation behind the creation and maintenance of the project. This should explain **why** the project exists.
-
+```
 ## Tests
 
 ```
