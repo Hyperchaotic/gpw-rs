@@ -7,24 +7,24 @@ A Rust library generating phonetic passwords and pass phrases.
 ## Code Example
 Generating 10 random passwords
 ``` rust
-let gpgen = Gpw::new();
+let gp = Gpw::<English>::new();
 
 let pw_length = 10;
 
 for _ in 0..10 {
-    let pw = gpgen.generate_password(pw_length);
+    let pw = gp.generate_password(pw_length);
     println!("{}", pw);
 }
 ```
 
 Generating 10 random pass phrases
 ``` rust
-let gpgen = Gpw::new();
+let gp = Gpw::<English>::new();
 
 let pp_length = 20;
 
 for _ in 0..10 {
-    let pw = gpgen.generate_passphrase(pp_length);
+    let pw = gp.generate_passphrase(pp_length);
     println!("{}", pw);
 }
 ```

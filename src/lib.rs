@@ -1,30 +1,64 @@
 extern crate rand;
+use rand::{thread_rng, Rng};
+
+pub struct English;
+
+/// Definition for languages to be used with the phonetic password generator
+/// Phonetic passwords will be generated using alphabet and trigraphs.
+/// Note key sizes from trigraphs must be in range 0..alphabet().len().
+/// Trigraph generating algorithmn is available here: http://www.multicians.org/thvv/tvvtools.html
+pub trait LanguageDef {
+    fn trigraphs(&self, key1: usize, key2: usize, key3: usize) -> u64;
+    fn alphabet(&self) -> Vec<char>;
+}
+
+/// Language definition for English
+impl LanguageDef for English {
+    fn trigraphs(&self, key1: usize, key2: usize, key3: usize) -> u64 {
+        TRI_FREQ[key1][key2][key3] as u64
+    }
+    fn alphabet(&self) -> Vec<char> {
+        return "abcdefghijklmnopqrstuvwxyz".chars().collect();
+    }
+}
 
 /// Phonetic Password Generator
-pub struct Gpw<'a> {
-    tris: &'a [[[u16; 26]; 26]; 26],
+struct Gpw<T: LanguageDef> {
+    lang: T,
     sigma: u64,
 }
 
-impl<'a> Gpw<'a> {
+impl<T> Gpw<T> where T: LanguageDef {
 
     /// Construct new password generator
-    pub fn new() -> Gpw<'a> {
-        Gpw::init(COMPUTED_SIGMA, TRI_FREQ)
+    /// Create like this: let gpgen = Gpw::<English>::new();
+    pub fn new() -> Gpw<English> {
+        Gpw::init(English{}, COMPUTED_SIGMA)
     }
 
-    // New password generator with custom dictionary data.
-    pub fn new_with_data(trigraph_freq: &'a [[[u16; 26]; 26]; 26]) -> Gpw<'a> {
-        Gpw::init(Gpw::compute_sigma(trigraph_freq), trigraph_freq)
+    /// New password generator with custom dictionary data.
+    pub fn new_with_data(lang: T) -> Gpw<T> {
+
+        // Compute trigraph sum (sigma).
+        let len = lang.alphabet().len();
+        let mut sigma: u64 = 0;
+        for i1 in 0..len {
+            for i2 in 0..len {
+                for i3 in 0..len {
+                    sigma += lang.trigraphs(i1, i2, i3);
+                }
+            }
+        }
+        Gpw::init(lang, sigma)
     }
 
-    fn init(sigma: u64, tris: &'a [[[u16; 26]; 26]; 26]) -> Gpw<'a> {
-        Gpw { tris: tris, sigma: sigma }
+    fn init(lang: T, sigma: u64) -> Gpw<T> {
+        Gpw { lang: lang, sigma: sigma }
     }
 
     /// Generate a pass phrase of a minimum length.
     pub fn generate_passphrase(&self, ph_length: usize) -> String {
-        use rand::{thread_rng, Rng};
+
         let mut rng = thread_rng();
 
         let mut password = String::new();
@@ -36,11 +70,11 @@ impl<'a> Gpw<'a> {
 
             let left = ph_length - password.len();
 
-            let length: usize = if left <= 9 {
-                                    std::cmp::max(left, 3)
-                                } else {
-                                    (rng.next_f64() * ((8-3) + 1) as f64 + 3 as f64) as usize
-                                };
+            let length = if left <= 9 {
+                             std::cmp::max(left, 3)
+                         } else {
+                             (rng.next_f64() * ((8-3) + 1) as f64 + 3 as f64) as usize
+                         };
 
             password.push_str(&self.generate_password(length));
         }
@@ -52,34 +86,37 @@ impl<'a> Gpw<'a> {
 
         let mut password = String::new();
 
-        use rand::{thread_rng, Rng};
         let mut rng = thread_rng();
         let ranno = (rng.next_f64() * self.sigma as f64) as u64;
 
         let mut sum: u64 = 0;
-        'outer: for c1 in 0..ASCII_LOWER.len() {
-            for c2 in 0..ASCII_LOWER.len() {
-                for c3 in 0..ASCII_LOWER.len() {
-                    sum += self.tris[c1][c2][c3] as u64;
+
+        let alphabet = self.lang.alphabet();
+        let len = alphabet.len();
+
+        'outer:
+        for (i1, c1) in alphabet.iter().enumerate() {
+            for (i2, c2) in alphabet.iter().enumerate() {
+                for (i3, c3) in alphabet.iter().enumerate() {
+                    sum += self.lang.trigraphs(i1, i2, i3);
                     if sum > ranno {
-            	        password.push(ASCII_LOWER[c1]);
-            	        password.push(ASCII_LOWER[c2]);
-            	        password.push(ASCII_LOWER[c3]);
+            	        password.push(*c1);
+            	        password.push(*c2);
+            	        password.push(*c3);
                         break 'outer;
                     }
-                } // for c3
-            } // for c2
-        } // 'outer: for
+                }
+            }
+        }
 
-        for nchar in 3.. pw_length {
-            let ch = password.chars().nth((nchar-2) as usize);
-            let c1 = ASCII_LOWER.iter().position(|&c| Some(c) == ch).unwrap_or_default();
-            let ch = password.chars().nth((nchar-1) as usize);
-            let c2 = ASCII_LOWER.iter().position(|&c| Some(c) == ch).unwrap_or_default();
+        for nchar in 3..pw_length {
+            let (ch1, ch2) = (password.chars().nth(nchar-2), password.chars().nth(nchar-1));
+            let i1 = alphabet.iter().position(|&c| Some(c) == ch1).unwrap_or_default();
+            let i2 = alphabet.iter().position(|&c| Some(c) == ch2).unwrap_or_default();
 
             sum = 0;
-            for c3 in 0..ASCII_LOWER.len() {
-                sum += self.tris[c1][c2][c3] as u64;
+            for i3 in 0..len {
+                sum += self.lang.trigraphs(i1, i2, i3);
             }
             if sum == 0 {
                 // Sum mustn't be 0, discard current and retry
@@ -89,24 +126,15 @@ impl<'a> Gpw<'a> {
             let ranno = (rng.next_f64() * sum as f64) as u64;
 
             sum = 0;
-            for c3 in 0..ASCII_LOWER.len() {
-                sum += self.tris[c1][c2][c3] as u64;
+            for (i3, c3) in alphabet.iter().enumerate() {
+                sum += self.lang.trigraphs(i1, i2, i3);
                 if sum > ranno {
-                    password.push(ASCII_LOWER[c3]);
+                    password.push(*c3);
                     break;
                 }
-            } // for c3
+            } // for i3
         } // for nchar
         password
-    }
-
-    // Sum the weights
-    fn compute_sigma(tris: & [[[u16; 26]; 26]; 26]) -> u64 {
-
-        tris.iter().flat_map(|s| s.iter())
-            .flat_map(|t| t.iter())
-            .fold(0, |acc, &x| acc + x as u64)
-
     }
 }
 
@@ -116,7 +144,7 @@ fn test_length_single_password() {
     use rand::{thread_rng, Rng};
     let mut rng = thread_rng();
 
-    let gpgen = Gpw::new();
+    let gpgen = Gpw::<English>::new();
 
     let iterations = 10;
 
@@ -136,7 +164,7 @@ fn test_passphrase() {
     use rand::{thread_rng, Rng};
     let mut rng = thread_rng();
 
-    let gpgen = Gpw::new();
+    let gpgen = Gpw::<English>::new();
 
     let iterations = 10;
 
@@ -149,10 +177,6 @@ fn test_passphrase() {
     }
     println!("\n"); // use "cargo test -- --nocapture" to see
 }
-
-const ASCII_LOWER: &'static [char; 26] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
-                                           'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
-                                           's', 't', 'u', 'v', 'w', 'x', 'y', 'z'];
 
 const COMPUTED_SIGMA: u64 = 125729;
 
